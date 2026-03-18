@@ -375,21 +375,31 @@ mod tests {
 
     /// Helper: create a provider that uses a shell script echoing stdin back.
     /// The script ignores CLI flags (`--print`, `--model`, `-`) and just cats stdin.
+    ///
+    /// Uses `OnceLock` to write the script file exactly once, avoiding
+    /// "Text file busy" (ETXTBSY) races when parallel tests try to
+    /// overwrite a script that another test is currently executing.
     fn echo_provider() -> ClaudeCodeProvider {
-        use std::io::Write;
-        let dir = std::env::temp_dir().join("zeroclaw_test_claude_code");
-        std::fs::create_dir_all(&dir).unwrap();
-        let script = dir.join("fake_claude.sh");
-        let mut f = std::fs::File::create(&script).unwrap();
-        writeln!(f, "#!/bin/sh\ncat /dev/stdin").unwrap();
-        drop(f);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        use std::sync::OnceLock;
+
+        static SCRIPT_PATH: OnceLock<PathBuf> = OnceLock::new();
+        let script = SCRIPT_PATH.get_or_init(|| {
+            use std::io::Write;
+            let dir = std::env::temp_dir().join("zeroclaw_test_claude_code");
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("fake_claude.sh");
+            let mut f = std::fs::File::create(&path).unwrap();
+            writeln!(f, "#!/bin/sh\ncat /dev/stdin").unwrap();
+            drop(f);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            path
+        });
         ClaudeCodeProvider {
-            binary_path: script,
+            binary_path: script.clone(),
         }
     }
 
