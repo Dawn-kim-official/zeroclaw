@@ -364,14 +364,14 @@ mod tests {
             id: "$evt:matrix.org".to_string(),
             sender: "@alice:matrix.org".to_string(),
             content: "hello world".to_string(),
-            timestamp: 1700000000,
+            timestamp: 1_700_000_000,
             channel: "matrix".to_string(),
             thread_ts: Some("$thread:matrix.org".to_string()),
         };
         assert_eq!(msg.id, "$evt:matrix.org");
         assert_eq!(msg.sender, "@alice:matrix.org");
         assert_eq!(msg.content, "hello world");
-        assert_eq!(msg.timestamp, 1700000000);
+        assert_eq!(msg.timestamp, 1_700_000_000);
         assert_eq!(msg.channel, "matrix");
         assert_eq!(msg.thread_ts.as_deref(), Some("$thread:matrix.org"));
     }
