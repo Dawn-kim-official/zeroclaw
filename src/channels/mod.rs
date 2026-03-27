@@ -1222,10 +1222,7 @@ fn append_sender_turn(ctx: &ChannelRuntimeContext, sender_key: &str, turn: ChatM
 fn extract_current_turn_tool_messages(history: &[ChatMessage]) -> Vec<ChatMessage> {
     // Find the index of the last user message — tool messages for the
     // current turn come after it.
-    let last_user_idx = history
-        .iter()
-        .rposition(|m| m.role == "user")
-        .unwrap_or(0);
+    let last_user_idx = history.iter().rposition(|m| m.role == "user").unwrap_or(0);
 
     let tail = &history[last_user_idx + 1..];
     if tail.is_empty() {
@@ -11396,7 +11393,9 @@ This is an example JSON object for profile settings."#;
     fn is_tool_call_content_detects_tool_calls() {
         assert!(is_tool_call_content("{\"tool_call\": \"shell\"}"));
         assert!(is_tool_call_content("<tool_call>shell</tool_call>"));
-        assert!(is_tool_call_content("{\"name\": \"read_file\", \"args\": {}}"));
+        assert!(is_tool_call_content(
+            "{\"name\": \"read_file\", \"args\": {}}"
+        ));
         assert!(!is_tool_call_content("The iPad has been blocked."));
         assert!(!is_tool_call_content(""));
     }
