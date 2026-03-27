@@ -323,8 +323,8 @@ impl LeakDetector {
         // intentionally appear in output. Strip them before entropy scanning so
         // they are not redacted as leaked credentials. See #4830.
         static RECEIPT_PATTERN: OnceLock<Regex> = OnceLock::new();
-        let receipt_re = RECEIPT_PATTERN
-            .get_or_init(|| Regex::new(r"zc-receipt-\d+-[A-Za-z0-9_-]+").unwrap());
+        let receipt_re =
+            RECEIPT_PATTERN.get_or_init(|| Regex::new(r"zc-receipt-\d+-[A-Za-z0-9_-]+").unwrap());
         let content_stripped = url_re.replace_all(content, "");
         let content_without_urls = media_re.replace_all(&content_stripped, "");
         let content_without_receipts = receipt_re.replace_all(&content_without_urls, "");
