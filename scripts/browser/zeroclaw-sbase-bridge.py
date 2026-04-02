@@ -271,6 +271,8 @@ class Bridge:
                 driver.execute_script(f"window.scrollBy({pixels}, 0);")
             elif direction == "left":
                 driver.execute_script(f"window.scrollBy(-{pixels}, 0);")
+            else:
+                return _err(f"Unknown scroll direction: {direction}")
             return _ok({"scrolled": direction, "pixels": pixels})
         except Exception as exc:
             return _err(f"Scroll failed: {exc}")

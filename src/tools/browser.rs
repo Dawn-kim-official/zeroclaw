@@ -91,6 +91,14 @@ impl Default for SeleniumBaseBridgeConfig {
     }
 }
 
+/// Escape a value for use inside a CSS attribute selector (`[attr="value"]`).
+fn css_escape_attr_value(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', " ")
+}
+
 /// Browser automation tool using pluggable backends.
 pub struct BrowserTool {
     security: Arc<SecurityPolicy>,
@@ -415,7 +423,7 @@ impl BrowserTool {
                 Ok(ResolvedBackend::ComputerUse)
             }
             BrowserBackendKind::SeleniumBase => {
-                if Self::is_seleniumbase_available().await {
+                if Self::is_seleniumbase_available(&self.seleniumbase_config.python_command).await {
                     Ok(ResolvedBackend::SeleniumBase)
                 } else {
                     anyhow::bail!(
@@ -428,7 +436,7 @@ impl BrowserTool {
                 if Self::rust_native_compiled() && self.rust_native_available() {
                     return Ok(ResolvedBackend::RustNative);
                 }
-                if Self::is_seleniumbase_available().await {
+                if Self::is_seleniumbase_available(&self.seleniumbase_config.python_command).await {
                     return Ok(ResolvedBackend::SeleniumBase);
                 }
                 if Self::is_agent_browser_available().await {
@@ -757,8 +765,8 @@ impl BrowserTool {
     }
 
     /// Check if SeleniumBase is installed and importable.
-    pub async fn is_seleniumbase_available() -> bool {
-        Command::new("python3")
+    pub async fn is_seleniumbase_available(python_command: &str) -> bool {
+        Command::new(python_command)
             .args(["-c", "import seleniumbase"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -962,15 +970,17 @@ impl BrowserTool {
                 action,
                 fill_value,
             } => {
-                let mut cmd = json!({"action": "click", "selector": format!("[{by}={value}]")});
+                let escaped = css_escape_attr_value(value);
+                let selector = format!("[{by}=\"{escaped}\"]");
                 if action == "fill" {
-                    cmd = json!({"action": "fill", "selector": format!("[{by}={value}]"), "value": fill_value.as_deref().unwrap_or("")});
+                    json!({"action": "fill", "selector": selector, "value": fill_value.as_deref().unwrap_or("")})
                 } else if action == "text" {
-                    cmd = json!({"action": "get_text", "selector": format!("[{by}={value}]")});
+                    json!({"action": "get_text", "selector": selector})
                 } else if action == "hover" {
-                    cmd = json!({"action": "hover", "selector": format!("[{by}={value}]")});
+                    json!({"action": "hover", "selector": selector})
+                } else {
+                    json!({"action": "click", "selector": selector})
                 }
-                cmd
             }
         };
 
@@ -3099,7 +3109,7 @@ for line in sys.stdin:
             None,
             "seleniumbase".into(),
             true,
-            "".into(),
+            String::new(),
             None,
             ComputerUseConfig::default(),
             SeleniumBaseBridgeConfig {
