@@ -399,13 +399,13 @@ fn apply_provider_update(
 
 /// Non-interactive setup: generates a sensible default config instantly.
 /// Use `zeroclaw onboard` or `zeroclaw onboard --api-key sk-... --provider openrouter --memory sqlite|lucid`.
-fn backend_key_from_choice(choice: usize) -> &'static str {
+pub fn backend_key_from_choice(choice: usize) -> &'static str {
     selectable_memory_backends()
         .get(choice)
         .map_or(default_memory_backend_key(), |backend| backend.key)
 }
 
-fn memory_config_defaults_for_backend(backend: &str) -> MemoryConfig {
+pub fn memory_config_defaults_for_backend(backend: &str) -> MemoryConfig {
     let profile = memory_backend_profile(backend);
 
     MemoryConfig {
@@ -5680,7 +5680,7 @@ fn setup_tunnel() -> Result<crate::config::TunnelConfig> {
 // ── Step 6: Scaffold workspace files ─────────────────────────────
 
 #[allow(clippy::too_many_lines)]
-async fn scaffold_workspace(
+pub async fn scaffold_workspace(
     workspace_dir: &Path,
     ctx: &ProjectContext,
     memory_backend: &str,

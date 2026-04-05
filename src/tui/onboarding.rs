@@ -54,6 +54,18 @@ enum Screen {
     ChannelStatus,
     HowChannelsWork,
     ChannelSelect,
+    // ── Full Setup only screens ────────────────────────────────────
+    WorkspaceDir,
+    TunnelInfo,
+    TunnelSelect,
+    TunnelTokenInput,
+    ToolModeSelect,
+    ToolModeApiKey,
+    HardwareSelect,
+    HardwareDetails,
+    MemorySelect,
+    ProjectContext,
+    // ── End Full Setup only ────────────────────────────────────────
     WebSearchInfo,
     WebSearchProvider,
     WebSearchApiKey,
@@ -271,8 +283,60 @@ const SKILLS: &[(&str, &str)] = &[
     ("\u{1f426} xurl", "URL tools"),
 ];
 
+// ── Full Setup data ─────────────────────────────────────────────────
+
+const TUNNEL_PROVIDERS: &[(&str, &str)] = &[
+    ("Skip (localhost only)", "No external access"),
+    ("Cloudflare Tunnel", "Secure tunnel via cloudflared"),
+    ("Tailscale", "Tailscale Funnel / Serve"),
+    ("ngrok", "ngrok tunnel"),
+    ("Custom", "Custom tunnel command"),
+];
+
+const TOOL_MODES: &[(&str, &str)] = &[
+    ("Sovereign", "Use built-in tools only (recommended)"),
+    ("Composio", "Enable 1000+ OAuth tools via Composio"),
+];
+
+const HARDWARE_MODES: &[(&str, &str)] = &[
+    ("Software only", "No hardware peripherals"),
+    ("Native", "Direct board access (USB/serial)"),
+    ("Tethered (Serial)", "Serial port connection"),
+    ("Probe", "Debug probe (STM32, nRF, etc.)"),
+];
+
+const MEMORY_BACKENDS: &[(&str, &str)] = &[
+    ("SQLite", "Persistent structured memory (recommended)"),
+    ("Lucid", "Conversational RAG memory"),
+    ("Markdown", "Flat file memory"),
+    ("None", "No persistent memory"),
+];
+
+const TIMEZONES: &[&str] = &[
+    "UTC",
+    "US/Eastern",
+    "US/Central",
+    "US/Mountain",
+    "US/Pacific",
+    "Europe/London",
+    "Europe/Paris",
+    "Europe/Berlin",
+    "Asia/Tokyo",
+    "Asia/Shanghai",
+    "Asia/Kolkata",
+    "Australia/Sydney",
+];
+
+const COMM_STYLES: &[&str] = &[
+    "Warm & natural (recommended)",
+    "Concise & technical",
+    "Formal & professional",
+    "Casual & friendly",
+];
+
 // ── App state ───────────────────────────────────────────────────────
 
+#[allow(clippy::struct_excessive_bools)]
 struct App {
     screen: Screen,
     should_quit: bool,
@@ -312,7 +376,37 @@ struct App {
     // Hooks
     hooks_idx: usize,
 
-    // Gateway
+    // ── Full Setup fields ─────────────────────────────────────────
+    // Workspace
+    workspace_dir_input: String,
+
+    // Tunnel
+    tunnel_provider_idx: usize,
+    tunnel_token_input: String,
+
+    // Tool mode
+    tool_mode_idx: usize,
+    composio_api_key_input: String,
+    secrets_encrypt: bool,
+
+    // Hardware
+    hardware_mode_idx: usize,
+    hardware_serial_port_input: String,
+    hardware_baud_rate_idx: usize,
+    hardware_probe_target_input: String,
+
+    // Memory
+    memory_backend_idx: usize,
+    memory_auto_save: bool,
+
+    // Project context
+    user_name_input: String,
+    agent_name_input: String,
+    timezone_idx: usize,
+    comm_style_idx: usize,
+    project_context_field: usize,
+
+    // ── Gateway ────────────────────────────────────────────────────
     gateway_port: u16,
     gateway_host: String,
     pairing_code: String,
@@ -350,6 +444,27 @@ impl App {
             skills_idx: 0,
             skills_scroll: 0,
             hooks_idx: 0,
+            // Full Setup defaults
+            workspace_dir_input: std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .map(|h| format!("{h}/.zeroclaw/workspace"))
+                .unwrap_or_else(|_| "~/.zeroclaw/workspace".to_string()),
+            tunnel_provider_idx: 0,
+            tunnel_token_input: String::new(),
+            tool_mode_idx: 0,
+            composio_api_key_input: String::new(),
+            secrets_encrypt: true,
+            hardware_mode_idx: 0,
+            hardware_serial_port_input: String::new(),
+            hardware_baud_rate_idx: 3, // 115200
+            hardware_probe_target_input: String::new(),
+            memory_backend_idx: 0, // sqlite
+            memory_auto_save: true,
+            user_name_input: String::new(),
+            agent_name_input: String::from("ZeroClaw"),
+            timezone_idx: 0, // UTC
+            comm_style_idx: 0,
+            project_context_field: 0,
             gateway_port: port,
             gateway_host: host,
             pairing_code: String::from("......"),
@@ -681,6 +796,39 @@ async fn save_tui_config(app: &App) -> Result<()> {
     apply_tui_selections_to_config(app, &mut config);
     config.save().await?;
 
+    // Scaffold workspace files for Full Setup
+    if app.setup_mode_idx == 1 {
+        let ctx = crate::onboard::ProjectContext {
+            user_name: if app.user_name_input.is_empty() {
+                "User".to_string()
+            } else {
+                app.user_name_input.clone()
+            },
+            agent_name: if app.agent_name_input.is_empty() {
+                "ZeroClaw".to_string()
+            } else {
+                app.agent_name_input.clone()
+            },
+            timezone: TIMEZONES
+                .get(app.timezone_idx)
+                .copied()
+                .unwrap_or("UTC")
+                .to_string(),
+            communication_style: COMM_STYLES
+                .get(app.comm_style_idx)
+                .copied()
+                .unwrap_or("Warm & natural")
+                .to_string(),
+        };
+        let backend_key = crate::memory::backend::selectable_memory_backends()
+            .get(app.memory_backend_idx)
+            .map_or("sqlite", |b| b.key);
+        let workspace_dir = std::path::Path::new(&app.workspace_dir_input);
+        if let Err(e) = crate::onboard::scaffold_workspace(workspace_dir, &ctx, backend_key).await {
+            eprintln!("  Warning: could not scaffold workspace: {e}");
+        }
+    }
+
     // Also push config to Docker container if running
     push_config_to_docker(app).await;
 
@@ -953,6 +1101,73 @@ fn apply_tui_selections_to_config(app: &App, config: &mut Config) {
 
     // ── Pairing / security ──────────────────────────────────────────
     config.gateway.require_pairing = app.pairing_required;
+
+    // ── Full Setup fields (only applied when setup_mode_idx == 1) ──
+    if app.setup_mode_idx == 1 {
+        // Workspace
+        config.workspace_dir = std::path::PathBuf::from(&app.workspace_dir_input);
+
+        // Tunnel
+        let tunnel_ids = ["none", "cloudflare", "tailscale", "ngrok", "custom"];
+        let tunnel_id = tunnel_ids
+            .get(app.tunnel_provider_idx)
+            .copied()
+            .unwrap_or("none");
+        config.tunnel.provider = tunnel_id.to_string();
+        match tunnel_id {
+            "cloudflare" if !app.tunnel_token_input.is_empty() => {
+                config.tunnel.cloudflare = Some(crate::config::schema::CloudflareTunnelConfig {
+                    token: app.tunnel_token_input.clone(),
+                });
+            }
+            "ngrok" if !app.tunnel_token_input.is_empty() => {
+                config.tunnel.ngrok = Some(crate::config::schema::NgrokTunnelConfig {
+                    auth_token: app.tunnel_token_input.clone(),
+                    domain: None,
+                });
+            }
+            "custom" if !app.tunnel_token_input.is_empty() => {
+                config.tunnel.custom = Some(crate::config::schema::CustomTunnelConfig {
+                    start_command: app.tunnel_token_input.clone(),
+                    health_url: None,
+                    url_pattern: None,
+                });
+            }
+            _ => {}
+        }
+
+        // Tool mode
+        if app.tool_mode_idx == 1 {
+            config.composio.enabled = true;
+            if !app.composio_api_key_input.is_empty() {
+                config.composio.api_key = Some(app.composio_api_key_input.clone());
+            }
+        }
+        config.secrets.encrypt = app.secrets_encrypt;
+
+        // Hardware
+        let hw_transport = match app.hardware_mode_idx {
+            1 => crate::config::schema::HardwareTransport::Native,
+            2 => crate::config::schema::HardwareTransport::Serial,
+            3 => crate::config::schema::HardwareTransport::Probe,
+            _ => crate::config::schema::HardwareTransport::None,
+        };
+        config.hardware.enabled = app.hardware_mode_idx != 0;
+        config.hardware.transport = hw_transport;
+        if app.hardware_mode_idx == 2 && !app.hardware_serial_port_input.is_empty() {
+            config.hardware.serial_port = Some(app.hardware_serial_port_input.clone());
+        }
+        if app.hardware_mode_idx == 3 && !app.hardware_probe_target_input.is_empty() {
+            config.hardware.probe_target = Some(app.hardware_probe_target_input.clone());
+        }
+
+        // Memory
+        let backend_key = crate::memory::backend::selectable_memory_backends()
+            .get(app.memory_backend_idx)
+            .map_or("sqlite", |b| b.key);
+        config.memory = crate::onboard::memory_config_defaults_for_backend(backend_key);
+        config.memory.auto_save = app.memory_auto_save;
+    }
 }
 
 /// If a ZeroClaw Docker container is running, reconfigure it via `docker exec`.
@@ -1219,14 +1434,205 @@ fn handle_input(app: &mut App, key: KeyCode) {
                 nav_down(&mut app.channel_idx, CHANNELS.len() - 1);
                 // Scroll down: handled in render via auto-scroll
             }
-            KeyCode::Enter => app.screen = Screen::WebSearchInfo,
+            KeyCode::Enter => {
+                // Full Setup branches into additional screens
+                app.screen = if app.setup_mode_idx == 1 {
+                    Screen::WorkspaceDir
+                } else {
+                    Screen::WebSearchInfo
+                };
+            }
             KeyCode::Esc => app.screen = Screen::HowChannelsWork,
             _ => {}
         },
 
+        // ── Full Setup only screens ────────────────────────────────
+        Screen::WorkspaceDir => match key {
+            KeyCode::Char(c) => app.workspace_dir_input.push(c),
+            KeyCode::Backspace => {
+                app.workspace_dir_input.pop();
+            }
+            KeyCode::Enter if !app.workspace_dir_input.is_empty() => {
+                app.screen = Screen::TunnelInfo;
+            }
+            KeyCode::Esc => app.screen = Screen::ChannelSelect,
+            _ => {}
+        },
+
+        Screen::TunnelInfo => match key {
+            KeyCode::Enter => app.screen = Screen::TunnelSelect,
+            KeyCode::Esc => app.screen = Screen::WorkspaceDir,
+            _ => {}
+        },
+
+        Screen::TunnelSelect => match key {
+            KeyCode::Up | KeyCode::Char('k') => nav_up(&mut app.tunnel_provider_idx),
+            KeyCode::Down | KeyCode::Char('j') => {
+                nav_down(&mut app.tunnel_provider_idx, TUNNEL_PROVIDERS.len() - 1);
+            }
+            KeyCode::Enter => {
+                // Only cloudflare (1), ngrok (3), custom (4) need a token
+                let needs_token = matches!(app.tunnel_provider_idx, 1 | 3 | 4);
+                app.screen = if needs_token {
+                    Screen::TunnelTokenInput
+                } else {
+                    Screen::ToolModeSelect
+                };
+            }
+            KeyCode::Esc => app.screen = Screen::TunnelInfo,
+            _ => {}
+        },
+
+        Screen::TunnelTokenInput => match key {
+            KeyCode::Char(c) => app.tunnel_token_input.push(c),
+            KeyCode::Backspace => {
+                app.tunnel_token_input.pop();
+            }
+            KeyCode::Enter => app.screen = Screen::ToolModeSelect,
+            KeyCode::Esc => {
+                app.tunnel_token_input.clear();
+                app.screen = Screen::TunnelSelect;
+            }
+            _ => {}
+        },
+
+        Screen::ToolModeSelect => match key {
+            KeyCode::Up | KeyCode::Char('k') => nav_up(&mut app.tool_mode_idx),
+            KeyCode::Down | KeyCode::Char('j') => {
+                nav_down(&mut app.tool_mode_idx, TOOL_MODES.len() - 1)
+            }
+            KeyCode::Char('s' | 'S') => app.secrets_encrypt = !app.secrets_encrypt,
+            KeyCode::Enter => {
+                app.screen = if app.tool_mode_idx == 1 {
+                    Screen::ToolModeApiKey
+                } else {
+                    Screen::HardwareSelect
+                };
+            }
+            KeyCode::Esc => app.screen = Screen::TunnelSelect,
+            _ => {}
+        },
+
+        Screen::ToolModeApiKey => match key {
+            KeyCode::Char(c) => app.composio_api_key_input.push(c),
+            KeyCode::Backspace => {
+                app.composio_api_key_input.pop();
+            }
+            KeyCode::Enter => app.screen = Screen::HardwareSelect,
+            KeyCode::Esc => {
+                app.composio_api_key_input.clear();
+                app.screen = Screen::ToolModeSelect;
+            }
+            _ => {}
+        },
+
+        Screen::HardwareSelect => match key {
+            KeyCode::Up | KeyCode::Char('k') => nav_up(&mut app.hardware_mode_idx),
+            KeyCode::Down | KeyCode::Char('j') => {
+                nav_down(&mut app.hardware_mode_idx, HARDWARE_MODES.len() - 1);
+            }
+            KeyCode::Enter => {
+                // Serial (2) or Probe (3) need details
+                let needs_details = matches!(app.hardware_mode_idx, 2 | 3);
+                app.screen = if needs_details {
+                    Screen::HardwareDetails
+                } else {
+                    Screen::MemorySelect
+                };
+            }
+            KeyCode::Esc => app.screen = Screen::ToolModeSelect,
+            _ => {}
+        },
+
+        Screen::HardwareDetails => match key {
+            KeyCode::Char(c) => {
+                if app.hardware_mode_idx == 2 {
+                    app.hardware_serial_port_input.push(c);
+                } else {
+                    app.hardware_probe_target_input.push(c);
+                }
+            }
+            KeyCode::Backspace => {
+                if app.hardware_mode_idx == 2 {
+                    app.hardware_serial_port_input.pop();
+                } else {
+                    app.hardware_probe_target_input.pop();
+                }
+            }
+            KeyCode::Enter => app.screen = Screen::MemorySelect,
+            KeyCode::Esc => app.screen = Screen::HardwareSelect,
+            _ => {}
+        },
+
+        Screen::MemorySelect => match key {
+            KeyCode::Up | KeyCode::Char('k') => nav_up(&mut app.memory_backend_idx),
+            KeyCode::Down | KeyCode::Char('j') => {
+                nav_down(&mut app.memory_backend_idx, MEMORY_BACKENDS.len() - 1);
+            }
+            KeyCode::Char('a' | 'A') => app.memory_auto_save = !app.memory_auto_save,
+            KeyCode::Enter => app.screen = Screen::ProjectContext,
+            KeyCode::Esc => app.screen = Screen::HardwareSelect,
+            _ => {}
+        },
+
+        Screen::ProjectContext => match key {
+            KeyCode::Tab | KeyCode::Down => {
+                app.project_context_field = (app.project_context_field + 1) % 4;
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                app.project_context_field = app.project_context_field.checked_sub(1).unwrap_or(3);
+            }
+            KeyCode::Char(c) => match app.project_context_field {
+                0 => app.user_name_input.push(c),
+                1 => app.agent_name_input.push(c),
+                2 => match c {
+                    'k' => nav_up(&mut app.timezone_idx),
+                    'j' => nav_down(&mut app.timezone_idx, TIMEZONES.len() - 1),
+                    _ => {}
+                },
+                3 => match c {
+                    'k' => nav_up(&mut app.comm_style_idx),
+                    'j' => nav_down(&mut app.comm_style_idx, COMM_STYLES.len() - 1),
+                    _ => {}
+                },
+                _ => {}
+            },
+            KeyCode::Backspace => match app.project_context_field {
+                0 => {
+                    app.user_name_input.pop();
+                }
+                1 => {
+                    app.agent_name_input.pop();
+                }
+                _ => {}
+            },
+            KeyCode::Left if app.project_context_field == 2 => {
+                nav_up(&mut app.timezone_idx);
+            }
+            KeyCode::Right if app.project_context_field == 2 => {
+                nav_down(&mut app.timezone_idx, TIMEZONES.len() - 1);
+            }
+            KeyCode::Left if app.project_context_field == 3 => {
+                nav_up(&mut app.comm_style_idx);
+            }
+            KeyCode::Right if app.project_context_field == 3 => {
+                nav_down(&mut app.comm_style_idx, COMM_STYLES.len() - 1);
+            }
+            KeyCode::Enter => app.screen = Screen::WebSearchInfo,
+            KeyCode::Esc => app.screen = Screen::MemorySelect,
+            _ => {}
+        },
+
+        // ── End Full Setup only ────────────────────────────────────
         Screen::WebSearchInfo => match key {
             KeyCode::Enter => app.screen = Screen::WebSearchProvider,
-            KeyCode::Esc => app.screen = Screen::ChannelSelect,
+            KeyCode::Esc => {
+                app.screen = if app.setup_mode_idx == 1 {
+                    Screen::ProjectContext
+                } else {
+                    Screen::ChannelSelect
+                };
+            }
             _ => {}
         },
 
@@ -1393,7 +1799,12 @@ fn render(frame: &mut Frame, app: &App) {
 
     // Footer (context-sensitive)
     let footer = match app.screen {
-        Screen::ApiKeyInput | Screen::WebSearchApiKey => Line::from(vec![
+        Screen::ApiKeyInput
+        | Screen::WebSearchApiKey
+        | Screen::WorkspaceDir
+        | Screen::TunnelTokenInput
+        | Screen::ToolModeApiKey
+        | Screen::HardwareDetails => Line::from(vec![
             Span::styled(" Enter", theme::heading_style()),
             Span::styled(" confirm  ", theme::dim_style()),
             Span::styled("Esc", theme::heading_style()),
@@ -1411,6 +1822,7 @@ fn render(frame: &mut Frame, app: &App) {
         | Screen::ModelConfigured
         | Screen::ChannelStatus
         | Screen::HowChannelsWork
+        | Screen::TunnelInfo
         | Screen::WebSearchInfo
         | Screen::SkillsStatus
         | Screen::HooksInfo
@@ -1468,6 +1880,16 @@ fn render(frame: &mut Frame, app: &App) {
         Screen::ChannelStatus => render_channel_status(frame, content),
         Screen::HowChannelsWork => render_how_channels_work(frame, content),
         Screen::ChannelSelect => render_channel_select(frame, content, app),
+        Screen::WorkspaceDir => render_workspace_dir(frame, content, app),
+        Screen::TunnelInfo => render_tunnel_info(frame, content),
+        Screen::TunnelSelect => render_tunnel_select(frame, content, app),
+        Screen::TunnelTokenInput => render_tunnel_token(frame, content, app),
+        Screen::ToolModeSelect => render_tool_mode_select(frame, content, app),
+        Screen::ToolModeApiKey => render_tool_mode_api_key(frame, content, app),
+        Screen::HardwareSelect => render_hardware_select(frame, content, app),
+        Screen::HardwareDetails => render_hardware_details(frame, content, app),
+        Screen::MemorySelect => render_memory_select(frame, content, app),
+        Screen::ProjectContext => render_project_context(frame, content, app),
         Screen::WebSearchInfo => render_web_search_info(frame, content),
         Screen::WebSearchProvider => render_web_search_provider(frame, content, app),
         Screen::WebSearchApiKey => render_web_search_api_key(frame, content, app),
@@ -3070,6 +3492,457 @@ fn render_complete(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(cont), layout[2]);
 }
 
+// ── Full Setup render functions ─────────────────────────────────────
+
+fn render_workspace_dir(frame: &mut Frame, area: Rect, app: &App) {
+    let layout = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(6),
+        Constraint::Length(3),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    frame.render_widget(setup_title(), layout[0]);
+    frame.render_widget(
+        InfoPanel {
+            title: "Workspace Directory",
+            lines: vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Where should ZeroClaw store workspace files?",
+                    theme::body_style(),
+                )),
+                Line::from(Span::styled(
+                    "  (SOUL.md, USER.md, AGENTS.md, memory, etc.)",
+                    theme::dim_style(),
+                )),
+                Line::from(""),
+            ],
+        },
+        layout[1],
+    );
+    frame.render_widget(
+        InputPrompt {
+            label: "Path",
+            input: &app.workspace_dir_input,
+            masked: false,
+        },
+        layout[2],
+    );
+}
+
+fn render_tunnel_info(frame: &mut Frame, area: Rect) {
+    let layout = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(10),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    frame.render_widget(setup_title(), layout[0]);
+    frame.render_widget(
+        InfoPanel {
+            title: "Tunnel / Expose",
+            lines: vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Tunnels expose your ZeroClaw gateway to the internet so",
+                    theme::body_style(),
+                )),
+                Line::from(Span::styled(
+                    "  channels like Telegram webhooks can reach your agent.",
+                    theme::body_style(),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  If you only use polling channels or run locally,",
+                    theme::dim_style(),
+                )),
+                Line::from(Span::styled(
+                    "  you can skip this step.",
+                    theme::dim_style(),
+                )),
+                Line::from(""),
+            ],
+        },
+        layout[1],
+    );
+}
+
+fn render_tunnel_select(frame: &mut Frame, area: Rect, app: &App) {
+    let layout = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(8),
+        Constraint::Length(1),
+    ])
+    .split(area);
+
+    frame.render_widget(setup_title(), layout[0]);
+
+    let items: Vec<SelectableItem> = TUNNEL_PROVIDERS
+        .iter()
+        .enumerate()
+        .map(|(i, (name, desc))| SelectableItem {
+            label: name.to_string(),
+            hint: desc.to_string(),
+            is_active: i == app.tunnel_provider_idx,
+            installed: false,
+        })
+        .collect();
+
+    frame.render_widget(
+        SelectableList {
+            title: "Select tunnel provider",
+            items: &items,
+            selected: app.tunnel_provider_idx,
+            scroll_offset: 0,
+        },
+        layout[1],
+    );
+}
+
+fn render_tunnel_token(frame: &mut Frame, area: Rect, app: &App) {
+    let provider_name = TUNNEL_PROVIDERS
+        .get(app.tunnel_provider_idx)
+        .map_or("Tunnel", |p| p.0);
+
+    let layout = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(4),
+        Constraint::Length(3),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    frame.render_widget(setup_title(), layout[0]);
+    frame.render_widget(
+        InfoPanel {
+            title: "Tunnel Authentication",
+            lines: vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!("  Enter your {provider_name} auth token:"),
+                    theme::body_style(),
+                )),
+            ],
+        },
+        layout[1],
+    );
+    frame.render_widget(
+        InputPrompt {
+            label: "Token",
+            input: &app.tunnel_token_input,
+            masked: true,
+        },
+        layout[2],
+    );
+}
+
+fn render_tool_mode_select(frame: &mut Frame, area: Rect, app: &App) {
+    let layout = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(6),
+        Constraint::Length(2),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    frame.render_widget(setup_title(), layout[0]);
+
+    let items: Vec<SelectableItem> = TOOL_MODES
+        .iter()
+        .enumerate()
+        .map(|(i, (name, desc))| SelectableItem {
+            label: name.to_string(),
+            hint: desc.to_string(),
+            is_active: i == app.tool_mode_idx,
+            installed: false,
+        })
+        .collect();
+
+    frame.render_widget(
+        SelectableList {
+            title: "Tool mode",
+            items: &items,
+            selected: app.tool_mode_idx,
+            scroll_offset: 0,
+        },
+        layout[1],
+    );
+
+    let encrypt_label = if app.secrets_encrypt { "ON" } else { "OFF" };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("  Secrets encryption: ", theme::dim_style()),
+            Span::styled(
+                encrypt_label,
+                if app.secrets_encrypt {
+                    theme::success_style()
+                } else {
+                    theme::warn_style()
+                },
+            ),
+            Span::styled("  (press S to toggle)", theme::dim_style()),
+        ])),
+        layout[2],
+    );
+}
+
+fn render_tool_mode_api_key(frame: &mut Frame, area: Rect, app: &App) {
+    let layout = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(4),
+        Constraint::Length(3),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    frame.render_widget(setup_title(), layout[0]);
+    frame.render_widget(
+        InfoPanel {
+            title: "Composio API Key",
+            lines: vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Get your key at https://composio.dev",
+                    theme::body_style(),
+                )),
+            ],
+        },
+        layout[1],
+    );
+    frame.render_widget(
+        InputPrompt {
+            label: "API Key",
+            input: &app.composio_api_key_input,
+            masked: true,
+        },
+        layout[2],
+    );
+}
+
+fn render_hardware_select(frame: &mut Frame, area: Rect, app: &App) {
+    let layout = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(8),
+        Constraint::Length(1),
+    ])
+    .split(area);
+
+    frame.render_widget(setup_title(), layout[0]);
+
+    let items: Vec<SelectableItem> = HARDWARE_MODES
+        .iter()
+        .enumerate()
+        .map(|(i, (name, desc))| SelectableItem {
+            label: name.to_string(),
+            hint: desc.to_string(),
+            is_active: i == app.hardware_mode_idx,
+            installed: false,
+        })
+        .collect();
+
+    frame.render_widget(
+        SelectableList {
+            title: "Hardware access",
+            items: &items,
+            selected: app.hardware_mode_idx,
+            scroll_offset: 0,
+        },
+        layout[1],
+    );
+}
+
+fn render_hardware_details(frame: &mut Frame, area: Rect, app: &App) {
+    let layout = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(4),
+        Constraint::Length(3),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    frame.render_widget(setup_title(), layout[0]);
+
+    if app.hardware_mode_idx == 2 {
+        // Serial
+        frame.render_widget(
+            InfoPanel {
+                title: "Serial Port",
+                lines: vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  e.g. /dev/ttyACM0, /dev/ttyUSB0, COM3",
+                        theme::dim_style(),
+                    )),
+                ],
+            },
+            layout[1],
+        );
+        frame.render_widget(
+            InputPrompt {
+                label: "Port",
+                input: &app.hardware_serial_port_input,
+                masked: false,
+            },
+            layout[2],
+        );
+    } else {
+        // Probe
+        frame.render_widget(
+            InfoPanel {
+                title: "Probe Target",
+                lines: vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  e.g. STM32F401RE, nRF52840, RP2040",
+                        theme::dim_style(),
+                    )),
+                ],
+            },
+            layout[1],
+        );
+        frame.render_widget(
+            InputPrompt {
+                label: "Chip",
+                input: &app.hardware_probe_target_input,
+                masked: false,
+            },
+            layout[2],
+        );
+    }
+}
+
+fn render_memory_select(frame: &mut Frame, area: Rect, app: &App) {
+    let layout = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(8),
+        Constraint::Length(2),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    frame.render_widget(setup_title(), layout[0]);
+
+    let items: Vec<SelectableItem> = MEMORY_BACKENDS
+        .iter()
+        .enumerate()
+        .map(|(i, (name, desc))| SelectableItem {
+            label: name.to_string(),
+            hint: desc.to_string(),
+            is_active: i == app.memory_backend_idx,
+            installed: false,
+        })
+        .collect();
+
+    frame.render_widget(
+        SelectableList {
+            title: "Memory backend",
+            items: &items,
+            selected: app.memory_backend_idx,
+            scroll_offset: 0,
+        },
+        layout[1],
+    );
+
+    let auto_label = if app.memory_auto_save { "ON" } else { "OFF" };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("  Auto-save conversations: ", theme::dim_style()),
+            Span::styled(
+                auto_label,
+                if app.memory_auto_save {
+                    theme::success_style()
+                } else {
+                    theme::warn_style()
+                },
+            ),
+            Span::styled("  (press A to toggle)", theme::dim_style()),
+        ])),
+        layout[2],
+    );
+}
+
+fn render_project_context(frame: &mut Frame, area: Rect, app: &App) {
+    let layout = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(4),
+        Constraint::Length(12),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    frame.render_widget(setup_title(), layout[0]);
+    frame.render_widget(
+        InfoPanel {
+            title: "Project Context",
+            lines: vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Personalize your workspace (Tab/\u{2191}\u{2193} to switch fields, \u{2190}\u{2192} to cycle options)",
+                    theme::dim_style(),
+                )),
+            ],
+        },
+        layout[1],
+    );
+
+    let fields = [
+        ("Your name", app.user_name_input.as_str()),
+        ("Agent name", app.agent_name_input.as_str()),
+        (
+            "Timezone",
+            TIMEZONES.get(app.timezone_idx).copied().unwrap_or("UTC"),
+        ),
+        (
+            "Style",
+            COMM_STYLES
+                .get(app.comm_style_idx)
+                .copied()
+                .unwrap_or("Warm & natural"),
+        ),
+    ];
+
+    let field_layout = Layout::vertical(
+        fields
+            .iter()
+            .map(|_| Constraint::Length(3))
+            .collect::<Vec<_>>(),
+    )
+    .split(layout[2]);
+
+    for (i, (label, value)) in fields.iter().enumerate() {
+        let is_active = i == app.project_context_field;
+        let style = if is_active {
+            theme::accent_style()
+        } else {
+            theme::dim_style()
+        };
+        let indicator = if is_active { "\u{25b6} " } else { "  " };
+
+        let line = if i >= 2 {
+            // Selector fields (timezone, comm style)
+            Line::from(vec![
+                Span::styled(indicator, style),
+                Span::styled(format!("{label}: "), style),
+                Span::styled(format!("\u{25c0} {value} \u{25b6}"), theme::heading_style()),
+            ])
+        } else {
+            // Text input fields
+            let cursor = if is_active { "\u{2588}" } else { "" };
+            Line::from(vec![
+                Span::styled(indicator, style),
+                Span::styled(format!("{label}: "), style),
+                Span::styled(*value, theme::heading_style()),
+                Span::styled(cursor, theme::accent_style()),
+            ])
+        };
+
+        frame.render_widget(Paragraph::new(line), field_layout[i]);
+    }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -3096,11 +3969,34 @@ mod tests {
             skills_idx: 0,
             skills_scroll: 0,
             hooks_idx: 0,
+            workspace_dir_input: "/tmp/test-workspace".to_string(),
+            tunnel_provider_idx: 0,
+            tunnel_token_input: String::new(),
+            tool_mode_idx: 0,
+            composio_api_key_input: String::new(),
+            secrets_encrypt: true,
+            hardware_mode_idx: 0,
+            hardware_serial_port_input: String::new(),
+            hardware_baud_rate_idx: 3,
+            hardware_probe_target_input: String::new(),
+            memory_backend_idx: 0,
+            memory_auto_save: true,
+            user_name_input: String::new(),
+            agent_name_input: "ZeroClaw".to_string(),
+            timezone_idx: 0,
+            comm_style_idx: 0,
+            project_context_field: 0,
             gateway_port: 42617,
             gateway_host: "127.0.0.1".to_string(),
             pairing_code: "123456".to_string(),
             pairing_required: true,
         }
+    }
+
+    fn test_app_full_setup() -> App {
+        let mut app = test_app();
+        app.setup_mode_idx = 1; // Full Setup
+        app
     }
 
     // ── Provider persistence ────────────────────────────────────────
@@ -3723,5 +4619,204 @@ mod tests {
             let _: Config = toml::from_str(&toml_str)
                 .unwrap_or_else(|e| panic!("failed to deserialize config for {channel_name}: {e}"));
         }
+    }
+
+    // ── Full Setup: tunnel persistence ─────────────────────────────
+
+    #[test]
+    fn full_setup_tunnel_cloudflare() {
+        let mut app = test_app_full_setup();
+        app.tunnel_provider_idx = 1; // Cloudflare
+        app.tunnel_token_input = "cf-tunnel-token-xyz".to_string();
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert_eq!(config.tunnel.provider, "cloudflare");
+        let cf = config
+            .tunnel
+            .cloudflare
+            .as_ref()
+            .expect("cloudflare config");
+        assert_eq!(cf.token, "cf-tunnel-token-xyz");
+    }
+
+    #[test]
+    fn full_setup_tunnel_ngrok() {
+        let mut app = test_app_full_setup();
+        app.tunnel_provider_idx = 3; // ngrok
+        app.tunnel_token_input = "ngrok-auth-token".to_string();
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert_eq!(config.tunnel.provider, "ngrok");
+        let ng = config.tunnel.ngrok.as_ref().expect("ngrok config");
+        assert_eq!(ng.auth_token, "ngrok-auth-token");
+    }
+
+    #[test]
+    fn full_setup_tunnel_skip() {
+        let mut app = test_app_full_setup();
+        app.tunnel_provider_idx = 0; // Skip
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert_eq!(config.tunnel.provider, "none");
+        assert!(config.tunnel.cloudflare.is_none());
+    }
+
+    // ── Full Setup: tool mode persistence ──────────────────────────
+
+    #[test]
+    fn full_setup_tool_mode_sovereign() {
+        let mut app = test_app_full_setup();
+        app.tool_mode_idx = 0; // Sovereign
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert!(!config.composio.enabled);
+    }
+
+    #[test]
+    fn full_setup_tool_mode_composio() {
+        let mut app = test_app_full_setup();
+        app.tool_mode_idx = 1; // Composio
+        app.composio_api_key_input = "comp-key-123".to_string();
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert!(config.composio.enabled);
+        assert_eq!(config.composio.api_key.as_deref(), Some("comp-key-123"));
+    }
+
+    #[test]
+    fn full_setup_secrets_encrypt() {
+        let mut app = test_app_full_setup();
+        app.secrets_encrypt = false;
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert!(!config.secrets.encrypt);
+    }
+
+    // ── Full Setup: hardware persistence ───────────────────────────
+
+    #[test]
+    fn full_setup_hardware_software_only() {
+        let mut app = test_app_full_setup();
+        app.hardware_mode_idx = 0; // Software only
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert!(!config.hardware.enabled);
+    }
+
+    #[test]
+    fn full_setup_hardware_serial() {
+        let mut app = test_app_full_setup();
+        app.hardware_mode_idx = 2; // Serial
+        app.hardware_serial_port_input = "/dev/ttyACM0".to_string();
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert!(config.hardware.enabled);
+        assert_eq!(config.hardware.serial_port.as_deref(), Some("/dev/ttyACM0"));
+    }
+
+    #[test]
+    fn full_setup_hardware_probe() {
+        let mut app = test_app_full_setup();
+        app.hardware_mode_idx = 3; // Probe
+        app.hardware_probe_target_input = "STM32F401RE".to_string();
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert!(config.hardware.enabled);
+        assert_eq!(config.hardware.probe_target.as_deref(), Some("STM32F401RE"));
+    }
+
+    // ── Full Setup: memory persistence ─────────────────────────────
+
+    #[test]
+    fn full_setup_memory_sqlite() {
+        let mut app = test_app_full_setup();
+        app.memory_backend_idx = 0; // SQLite
+        app.memory_auto_save = true;
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert_eq!(config.memory.backend, "sqlite");
+        assert!(config.memory.auto_save);
+    }
+
+    #[test]
+    fn full_setup_memory_none() {
+        let mut app = test_app_full_setup();
+        app.memory_backend_idx = 3; // None
+        app.memory_auto_save = false;
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert_eq!(config.memory.backend, "none");
+        assert!(!config.memory.auto_save);
+    }
+
+    // ── Full Setup: workspace path persistence ─────────────────────
+
+    #[test]
+    fn full_setup_workspace_dir() {
+        let mut app = test_app_full_setup();
+        app.workspace_dir_input = "/home/user/my-agent".to_string();
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert_eq!(
+            config.workspace_dir,
+            std::path::PathBuf::from("/home/user/my-agent")
+        );
+    }
+
+    // ── QuickStart does NOT apply Full Setup fields ────────────────
+
+    #[test]
+    fn quickstart_does_not_set_tunnel() {
+        let mut app = test_app();
+        app.setup_mode_idx = 0; // QuickStart
+        app.tunnel_provider_idx = 1; // Cloudflare (would set tunnel if Full)
+        app.tunnel_token_input = "should-not-persist".to_string();
+        let mut config = Config::default();
+        let default_provider = config.tunnel.provider.clone();
+        apply_tui_selections_to_config(&app, &mut config);
+        assert_eq!(config.tunnel.provider, default_provider);
+        assert!(config.tunnel.cloudflare.is_none());
+    }
+
+    // ── Full Setup end-to-end ──────────────────────────────────────
+
+    #[test]
+    fn e2e_full_setup_all_features() {
+        let mut app = test_app_full_setup();
+        app.provider_tier_idx = 0;
+        app.provider_idx = 2; // Anthropic
+        app.api_key_input = "sk-ant-full".to_string();
+        app.model_idx = 1;
+        app.channel_idx = 0; // Telegram
+        app.workspace_dir_input = "/opt/zeroclaw".to_string();
+        app.tunnel_provider_idx = 1;
+        app.tunnel_token_input = "cf-token".to_string();
+        app.tool_mode_idx = 1;
+        app.composio_api_key_input = "comp-key".to_string();
+        app.secrets_encrypt = true;
+        app.hardware_mode_idx = 0; // Software only
+        app.memory_backend_idx = 1; // Lucid
+        app.memory_auto_save = false;
+
+        let mut config = Config::default();
+        apply_tui_selections_to_config(&app, &mut config);
+
+        // Core fields
+        assert_eq!(config.default_provider.as_deref(), Some("anthropic"));
+        assert!(config.channels_config.telegram.is_some());
+
+        // Full Setup fields
+        assert_eq!(
+            config.workspace_dir,
+            std::path::PathBuf::from("/opt/zeroclaw")
+        );
+        assert_eq!(config.tunnel.provider, "cloudflare");
+        assert!(config.tunnel.cloudflare.is_some());
+        assert!(config.composio.enabled);
+        assert_eq!(config.composio.api_key.as_deref(), Some("comp-key"));
+        assert!(config.secrets.encrypt);
+        assert!(!config.hardware.enabled);
+        assert_eq!(config.memory.backend, "lucid");
+        assert!(!config.memory.auto_save);
     }
 }

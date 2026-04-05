@@ -3,8 +3,9 @@ pub mod wizard;
 // Re-exported for CLI and external use
 #[allow(unused_imports)]
 pub use wizard::{
+    ProjectContext, backend_key_from_choice, memory_config_defaults_for_backend,
     run_channels_repair_wizard, run_models_list, run_models_refresh, run_models_refresh_all,
-    run_models_set, run_models_status, run_quick_setup, run_wizard,
+    run_models_set, run_models_status, run_quick_setup, run_wizard, scaffold_workspace,
 };
 
 #[cfg(test)]
@@ -23,5 +24,8 @@ mod tests {
         assert_reexport_exists(run_models_set);
         assert_reexport_exists(run_models_status);
         assert_reexport_exists(run_models_refresh_all);
+        assert_reexport_exists(backend_key_from_choice);
+        assert_reexport_exists(memory_config_defaults_for_backend);
+        assert_reexport_exists(scaffold_workspace);
     }
 }
