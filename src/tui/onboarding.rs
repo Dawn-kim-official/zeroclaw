@@ -5010,7 +5010,9 @@ mod tests {
         // Verify display names start with the canonical key (case-insensitive).
         for (tui, profile) in MEMORY_BACKENDS.iter().zip(canonical.iter()) {
             assert!(
-                tui.0.to_lowercase().starts_with(&profile.key.to_lowercase())
+                tui.0
+                    .to_lowercase()
+                    .starts_with(&profile.key.to_lowercase())
                     || profile.key == "none" && tui.0 == "None",
                 "TUI label {:?} does not match canonical key {:?}",
                 tui.0,
