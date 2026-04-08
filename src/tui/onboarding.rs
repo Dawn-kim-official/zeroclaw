@@ -1921,7 +1921,6 @@ fn render(frame: &mut Frame, app: &App) {
         | Screen::HooksInfo
         | Screen::GatewayService
         | Screen::HealthCheck
-        | Screen::OptionalApps
         | Screen::ControlUI
         | Screen::WorkspaceBackup
         | Screen::FinalSecurity
@@ -1994,7 +1993,7 @@ fn render(frame: &mut Frame, app: &App) {
         Screen::HooksEnable => render_hooks_enable(frame, content, app),
         Screen::GatewayService => render_gateway_service(frame, content, app),
         Screen::HealthCheck => render_health_check(frame, content, app),
-        Screen::OptionalApps => render_optional_apps(frame, content),
+        Screen::OptionalApps => render_control_ui(frame, content, app), // skipped, redirect
         Screen::ControlUI => render_control_ui(frame, content, app),
         Screen::WorkspaceBackup => render_workspace_backup(frame, content),
         Screen::FinalSecurity => render_final_security(frame, content),
@@ -3195,47 +3194,6 @@ fn render_health_check(frame: &mut Frame, area: Rect, _app: &App) {
     frame.render_widget(continue_hint(), layout[3]);
 }
 
-// ── Screen: Optional apps ───────────────────────────────────────────
-
-fn render_optional_apps(frame: &mut Frame, area: Rect) {
-    let layout = Layout::vertical([
-        Constraint::Length(2),
-        Constraint::Length(10),
-        Constraint::Min(2),
-    ])
-    .split(area);
-
-    frame.render_widget(setup_title(), layout[0]);
-
-    frame.render_widget(
-        InfoPanel {
-            title: "Optional apps",
-            lines: vec![
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  Add nodes for extra features:",
-                    theme::body_style(),
-                )),
-                Line::from(Span::styled(
-                    "  - macOS app (system + notifications)",
-                    theme::body_style(),
-                )),
-                Line::from(Span::styled(
-                    "  - iOS app (camera/canvas)",
-                    theme::body_style(),
-                )),
-                Line::from(Span::styled(
-                    "  - Android app (camera/canvas)",
-                    theme::body_style(),
-                )),
-                Line::from(""),
-            ],
-        },
-        layout[1],
-    );
-
-    frame.render_widget(continue_hint(), layout[2]);
-}
 
 // ── Screen: Control UI ──────────────────────────────────────────────
 
