@@ -1864,7 +1864,7 @@ mod tests {
         let mut messages = vec![ConverseMessage {
             role: "assistant".to_string(),
             content: vec![ContentBlock::Text(TextBlock {
-                text: "".to_string(),
+                text: String::new(),
             })],
         }];
         BedrockProvider::sanitize_empty_content_blocks(&mut messages);
@@ -1898,7 +1898,7 @@ mod tests {
             ChatMessage::user("Hello"),
             ChatMessage {
                 role: "assistant".to_string(),
-                content: "".to_string(),
+                content: String::new(),
             },
             ChatMessage::user("Continue"),
         ];
