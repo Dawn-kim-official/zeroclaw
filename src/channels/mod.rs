@@ -1355,6 +1355,21 @@ fn should_rollback_failed_user_turn(error: &anyhow::Error) -> bool {
     crate::providers::reliable::is_non_retryable(error)
 }
 
+/// Detect errors caused by orphaned native tool_call_id references in the
+/// conversation history. OpenAI-compatible providers return a 400 error like:
+///   "No tool call found for function call output with call_id call_XYZ."
+/// when the history contains a tool-result message whose call_id does not
+/// match any tool_call in a preceding assistant message. This happens when
+/// an unsupported file/attachment triggers a tool call that fails, but the
+/// tool-result message persists in history. Unlike XML `<tool_result>` tags
+/// (which are stripped by `strip_tool_result_content`), native tool_call_id
+/// references cannot be selectively repaired — the entire history must be
+/// cleared to break the error loop.
+fn is_orphaned_tool_call_error(err: &anyhow::Error) -> bool {
+    let msg = err.to_string().to_lowercase();
+    msg.contains("no tool call found for function call output")
+}
+
 fn should_skip_memory_context_entry(key: &str, content: &str) -> bool {
     if memory::is_assistant_autosave_key(key) {
         return true;
@@ -3478,7 +3493,22 @@ async fn process_channel_message(
                 let rolled_back = should_rollback_user_turn
                     && rollback_orphan_user_turn(ctx.as_ref(), &history_key, &msg.content);
 
-                if !rolled_back {
+                // Detect orphaned native tool_call_id references that cannot
+                // be selectively repaired. When an OpenAI-compatible provider
+                // returns "No tool call found for function call output", the
+                // conversation history contains tool-result messages whose
+                // call_id no longer matches any assistant tool-call. Rolling
+                // back the last user turn is not enough — every subsequent
+                // request will hit the same 400 error. Clear the full history
+                // so the sender can start a fresh session (#5537).
+                if is_orphaned_tool_call_error(&e) {
+                    tracing::warn!(
+                        sender = %msg.sender,
+                        channel = %msg.channel,
+                        "Clearing sender history to break orphaned tool_call_id error loop"
+                    );
+                    clear_sender_history(ctx.as_ref(), &history_key);
+                } else if !rolled_back {
                     // Close the orphan user turn so subsequent messages don't
                     // inherit this failed request as unfinished context.
                     append_sender_turn(
@@ -6674,6 +6704,25 @@ mod tests {
         );
         assert_eq!(persisted[0].content, "first");
         assert_eq!(persisted[1].content, "ok");
+    }
+
+    #[test]
+    fn is_orphaned_tool_call_error_detects_openai_pattern() {
+        let err = anyhow::anyhow!(
+            "Custom API error (400 Bad Request): {{ \"error\": {{ \"message\": \
+             \"No tool call found for function call output with call_id call_NytBA43g.\", \
+             \"type\": \"invalid_request_error\" }} }}"
+        );
+        assert!(is_orphaned_tool_call_error(&err));
+    }
+
+    #[test]
+    fn is_orphaned_tool_call_error_ignores_unrelated_errors() {
+        let err = anyhow::anyhow!("rate limit exceeded");
+        assert!(!is_orphaned_tool_call_error(&err));
+
+        let err = anyhow::anyhow!("invalid api key");
+        assert!(!is_orphaned_tool_call_error(&err));
     }
 
     struct DummyProvider;
